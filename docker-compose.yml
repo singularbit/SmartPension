@@ -1,0 +1,26 @@
+nginx:
+    image: nginx:latest
+    ports:
+        - '80:80'
+    volumes:
+        - ./nginx:/etc/nginx/conf.d
+        - ./logs/nginx:/var/log/nginx
+        - ./wordpress:/var/www/html
+    links:
+        - wordpress
+    restart: always
+
+wordpress:
+    image: wordpress:4.7.1-php7.0-fpm
+    ports:
+        - '9000:9000'
+    volumes:
+        - ./wordpress:/var/www/html
+    environment:
+        - WORDPRESS_DB_USER=testuserpass
+        - WORDPRESS_DB_NAME=wordpressdb
+        - WORDPRESS_DB_HOST=wd2ydw4882z2oq.c4d3hhhhtwlj.eu-west-1.rds.amazonaws.com
+        - WORDPRESS_DB_PASSWORD=testrdspass
+        - WORDPRESS_TABLE_PREFIX=wp_
+    restart: always
+
