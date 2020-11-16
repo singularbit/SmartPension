@@ -1,0 +1,478 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: "Quick&Dirty VPC / NAT / ALB / RDS / Bootstrap"
+
+Parameters:
+
+  VPCName:
+    Description: VPC Name
+    Type: String
+    Default: VPCNATALBRDS
+
+  CIDRPrefix:
+    Description: VPC CIDR 
+    Type: String
+    Default: "10.100"
+
+  KeyName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: EC2 KeyPair / SSH to EC2.
+    Default: singularcloud
+
+Resources:
+
+  VpcId:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Join [ '', [ !Ref CIDRPrefix, ".0.0/16" ] ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+  VPCSSM:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/sbit/${VPCName}/VPC_ID"
+      Type: "String"
+      Value: !Ref VpcId
+
+  PrivateSubnetA:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Join ['', [!Ref "AWS::Region", "a"] ]
+      VpcId: !Ref VpcId
+      CidrBlock: !Join [ '', [ !Ref CIDRPrefix, ".0.0/20" ] ]
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join [ '', [ !Ref VPCName, "-Priv-A" ] ]
+  PrivateSubnetB:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Join ['', [!Ref "AWS::Region", "b"] ]
+      VpcId: !Ref VpcId
+      CidrBlock: !Join [ '', [ !Ref CIDRPrefix, ".16.0/20" ] ]
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join [ '', [ !Ref VPCName, "-Priv-B" ] ]
+  PrivateSubnetsSSM:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/sbit/${VPCName}/PRIVATE_SUBNETS"
+      Type: "String"
+      Value:
+        Fn::Join:
+          - ','
+          - - !Ref "PrivateSubnetA"
+            - !Ref "PrivateSubnetB"
+
+  PublicSubnetA:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Join ['', [!Ref "AWS::Region", "a"] ]
+      VpcId: !Ref VpcId
+      CidrBlock: !Join [ '', [ !Ref CIDRPrefix, ".48.0/20" ] ]
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join [ '', [ !Ref VPCName, "-Pub-A" ] ]
+  PublicSubnetB:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Join ['', [!Ref "AWS::Region", "b"] ]
+      VpcId: !Ref VpcId
+      CidrBlock: !Join [ '', [ !Ref CIDRPrefix, ".64.0/20" ] ]
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join [ '', [ !Ref VPCName, "-Pub-B" ] ]
+  PublicSubnetsSSM:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/sbit/${VPCName}/PUBLIC_SUBNETS"
+      Type: "String"
+      Value:
+        Fn::Join:
+          - ','
+          - - !Ref "PrivateSubnetA"
+            - !Ref "PublicSubnetB"
+
+  PrivateRouteTableA:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join ['', [!Ref VPCName, "-Priv-A"] ]
+  PrivateRouteTableB:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join ['', [!Ref VPCName, "-Priv-B"] ]
+
+  PublicRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Stack
+          Value: !Ref "AWS::StackId"
+        - Key: Name
+          Value: !Join ['', [!Ref VPCName, "-Pub"] ]
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+  AttachGateway:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VpcId
+      InternetGatewayId: !Ref InternetGateway
+
+  PrivateRouteA:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayA
+  PrivateRouteB:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayB
+
+  PublicRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRouteAssociatePublicSubnetA:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+  PrivateRouteAssociatePublicSubnetB:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PublicRouteAssociatePublicSubnetA:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+  PublicRouteAssociatePublicSubnetB:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  EIPA:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  NATGatewayA:
+    DependsOn: AttachGateway
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt
+        - EIPA
+        - AllocationId
+      SubnetId: !Ref PublicSubnetA
+
+  EIPB:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  NATGatewayB:
+    DependsOn: AttachGateway
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt
+        - EIPB
+        - AllocationId
+      SubnetId: !Ref PublicSubnetB
+
+  ApplicationLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Subnets: !Split [',', !Join [ ',', [ !Ref "PublicSubnetA" , !Ref "PublicSubnetB" ] ] ]
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+  ALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckPath: /wordpress/wp-admin/install.php
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'true'
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: '30'
+
+  WebServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: >-
+        Enable HTTP access via port 80 locked down to the load balancer + SSH
+        access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Select 
+            - 0
+            - !GetAtt 
+              - ApplicationLoadBalancer
+              - SecurityGroups
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VpcId
+
+  WebServerGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier: !Split [',', !Join [ ',', [ !Ref "PublicSubnetA" , !Ref "PublicSubnetB" ] ] ]
+      LaunchConfigurationName: !Ref LaunchConfig
+      MinSize: '1'
+      MaxSize: '5'
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref ALBTargetGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT2M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT2M
+        WaitOnResourceSignals: 'true'
+
+  LaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      'AWS::CloudFormation::Init':
+        configSets:
+          wordpress_install:
+            - install_cfn
+            - install_wordpress
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Join 
+                - ''
+                - - |
+                    [main]
+                  - stack=
+                  - !Ref 'AWS::StackId'
+                  - |+
+
+                  - region=
+                  - !Ref 'AWS::Region'
+                  - |+
+
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Join 
+                - ''
+                - - |
+                    [cfn-auto-reloader-hook]
+                  - |
+                    triggers=post.update
+                  - >
+                    path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
+                  - 'action=/opt/aws/bin/cfn-init -v '
+                  - '         --stack '
+                  - !Ref 'AWS::StackName'
+                  - '         --resource LaunchConfig '
+                  - '         --configsets wordpress_install '
+                  - '         --region '
+                  - !Ref 'AWS::Region'
+                  - |+
+
+              mode: '000400'
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+        install_wordpress:
+          packages:
+            yum:
+              php73: []
+              php73-mysqlnd: []
+              mysql57: []
+              httpd24: []
+          sources:
+            /var/www/html: 'http://wordpress.org/latest.tar.gz'
+          files:
+            /tmp/create-wp-config:
+              content: !Join 
+                - ''
+                - - |
+                    #!/bin/bash
+                  - >
+                    cp /var/www/html/wordpress/wp-config-sample.php
+                    /var/www/html/wordpress/wp-config.php
+                  - sed -i "s/'database_name_here'/'
+                  - "TestRDS"
+                  - |
+                    '/g" wp-config.php
+                  - sed -i "s/'username_here'/'
+                  - "TestRDSUser"
+                  - |
+                    '/g" wp-config.php
+                  - sed -i "s/'password_here'/'
+                  - "TestRDSPass"
+                  - |
+                    '/g" wp-config.php
+                  - sed -i "s/'localhost'/'
+                  - !GetAtt 
+                    - DBInstance
+                    - Endpoint.Address
+                  - |
+                    '/g" wp-config.php
+              mode: '000500'
+              owner: root
+              group: root
+          commands:
+            01_configure_wordpress:
+              command: /tmp/create-wp-config
+              cwd: /var/www/html/wordpress
+          services:
+            sysvinit:
+              httpd:
+                enabled: 'true'
+                ensureRunning: 'true'
+    Properties:
+      ImageId: "ami-015232c01a82b847b" #"ami-07d9160fa81ccffb5"
+      InstanceType: "t2.small"
+      SecurityGroups:
+        - !Ref WebServerSecurityGroup
+      KeyName: !Ref KeyName
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          STATE=1
+          function signal_state() {
+            /opt/aws/bin/cfn-signal \
+              --stack ${AWS::StackName} \
+              --resource WebServerGroup \
+              --region ${AWS::Region}
+              -e $STATE
+          }
+          trap "signal_state" exit
+
+          yum update -y aws-cfn-bootstrap
+
+          /opt/aws/bin/cfn-init \
+            --stack ${AWS::StackName} \
+            --resource LaunchConfig \
+            --configsets wordpress_install \
+            --region ${AWS::Region}
+
+          STATE=0
+
+  DBEC2SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Open database for access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '3306'
+          ToPort: '3306'
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+      VpcId: !Ref VpcId
+  DBSubnetGroup: 
+    Properties: 
+      DBSubnetGroupDescription: Private subnets for RDS
+      SubnetIds: 
+        - !Ref "PublicSubnetA"
+        - !Ref "PublicSubnetB"
+      Tags: 
+        - 
+          Key: String
+          Value: String
+    Type: "AWS::RDS::DBSubnetGroup"
+  DBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: "TestRDS"
+      Engine: MySQL
+      MultiAZ: "true"
+      MasterUsername: "TestRDSUser"
+      MasterUserPassword: "TestRDSPass"
+      DBInstanceClass: "db.t2.small"
+      AllocatedStorage: 5
+      VPCSecurityGroups:
+        - !GetAtt 
+          - DBEC2SecurityGroup
+          - GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+Outputs:
+
+  WebsiteURL:
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt 
+          - ApplicationLoadBalancer
+          - DNSName
+        - /wordpress
+    Description: WordPress Website
+
+
+
+

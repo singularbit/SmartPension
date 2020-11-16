@@ -17,10 +17,10 @@ wordpress:
     volumes:
         - ./wordpress:/var/www/html
     environment:
-        - WORDPRESS_DB_USER=testuserpass
-        - WORDPRESS_DB_NAME=wordpressdb
-        - WORDPRESS_DB_HOST=wd2ydw4882z2oq.c4d3hhhhtwlj.eu-west-1.rds.amazonaws.com
-        - WORDPRESS_DB_PASSWORD=testrdspass
+        - WORDPRESS_DB_USER=REPLACE_DB_USER
+        - WORDPRESS_DB_NAME=REPLACE_DB_NAME
+        - WORDPRESS_DB_HOST=REPLACE_DB_HOST
+        - WORDPRESS_DB_PASSWORD=REPLACE_DB_PASSWORD
         - WORDPRESS_TABLE_PREFIX=wp_
     restart: always
 

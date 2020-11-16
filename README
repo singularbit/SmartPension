@@ -1,0 +1,70 @@
+
+The objective of this work is to create a fully contained environment comprised of:
+- A MultiAZ VPC with Public and Private Subnets
+- A LoadBalancer with Autoscaling, supported by a CDN and DNS
+- A MultiAZ database running on Private Subnets
+- A MultiAZ application running on Private Subnets
+
+The Software is to be run on Docker with separate instances for the Webserver and the Application
+
+The present scripts are incomplete due to lack of time will not launch the demo application successfully.
+However, from what I have done so far I believe it should be enough to demonstrate my concept.
+
+
+
+and despite launching a WordPress application, they're not yet using Docker at this pont. However, from what I have done so far I believe it should be enough to demonstrate my concept.
+
+
+
+
+
+Objective:
+Launch an environment on AWS
+- Create VPC
+- Create Public and Private subnets
+- Create RDS on private subnets, MultiAZ
+- Create Load Balancer
+- Create a Bastion or configure Session Manager for ssh access
+- Launch Instances on private subnets
+- Install Docker/Docker-Compose
+- Deploy nginx-proxy and wordpress application
+- Configure CloudFront to access LoadBalancer
+- Configure DNS to access CloudFront
+
+Concept:
+- Applications run in private subnets accross multiple AZs
+- Database runs in private subnets accross multiple AZ's
+- Software is configured via docker-compose.yml files in a git repo
+
+Several steps and tweaks were not possible to do due to lack of time. The application is being launched on public subnets, at the moment, due to the lack of a Bastion or Session Manager.
+The application doesn't run correctly due to the above, however, the scripts made available should be enough to show the direction I was following.
+
+The CloudFormation stack and the docker-compose file live at:
+git clone https://github.com/singularbit/SmartPension.git
+
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          export PATH=$PATH:/usr/local/bin
+          yum install -y git
+          yum install docker
+          
+          if [ ! -x /usr/local/bin/docker-compose ]; then
+            export OS_NAME=`uname -s`
+            export OS_VERSION=`uname -m`
+            curl -L https://github.com/docker/compose/releases/download/1.27.4/docker-compose-${!OS_NAME}-${!OS_VERSION} -o /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+          fi
+          service docker start
+
+          git clone https://github.com/singularbit/SmartPension.git
+          cd SmartPension
+          sed -i "s/REPLACE_DB_HOST/${DBInstance}/g" docker-compose.yml
+          sed -i "s/REPLACE_DB_USER/TestRDSUser/g" docker-compose.yml
+          sed -i "s/REPLACE_DB_PASSWORD/TestRDSPass/g" docker-compose.yml
+          sed -i "s/REPLACE_DB_NAME/TestRDS/g" docker-compose.yml
+         
+          docker-compose up -d
+
